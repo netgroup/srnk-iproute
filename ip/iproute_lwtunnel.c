@@ -167,7 +167,36 @@ static const char *seg6_action_names[SEG6_LOCAL_ACTION_MAX + 1] = {
 	[SEG6_LOCAL_ACTION_END_S]		= "End.S",
 	[SEG6_LOCAL_ACTION_END_AS]		= "End.AS",
 	[SEG6_LOCAL_ACTION_END_AM]		= "End.AM",
+        /* $Andrea */
+        [SEG6_LOCAL_ACTION_END_AD]              = "End.AD",
 };
+
+/* $Andrea */
+
+const char *seg6local_format_action_type(int action)
+{
+        if (action < 0 || action > SEG6_LOCAL_ACTION_MAX)
+                return "<invalid>";
+
+        return seg6_action_names[action] ?: "<unknown>";
+}
+
+/* $Andrea */
+int seg6local_read_action_type(const char *name)
+{
+        int i;
+
+        for (i = 0; i < SEG6_LOCAL_ACTION_MAX + 1; i++) {
+                if (!seg6_action_names[i])
+                        continue;
+
+                if (strcmp(seg6_action_names[i], name) == 0)
+                        return i;
+        }
+
+        return SEG6_LOCAL_ACTION_UNSPEC;
+}
+
 
 static const char *format_action_type(int action)
 {
@@ -237,6 +266,21 @@ static void print_encap_seg6local(FILE *fp, struct rtattr *encap)
 
 		fprintf(fp, "oif %s ",
 			if_indextoname(oif, ifbuf) ?: "<unknown>");
+	}
+
+	/* $Andrea */
+        if (tb[SEG6_LOCAL_NHETH]) {
+                char buf[32];
+                unsigned char *ethaddr = RTA_DATA(tb[SEG6_LOCAL_NHETH]);
+
+                fprintf(fp, "nheth %s ", ll_addr_n2a(ethaddr, ETH_ALEN,
+                                0, buf, 18));
+        }
+
+	/* $Andrea */
+	if (tb[SEG6_LOCAL_TIMEOUT]) {
+		fprintf(fp, "age %u ",
+				rta_getattr_u32(tb[SEG6_LOCAL_TIMEOUT]));
 	}
 }
 
@@ -531,14 +575,17 @@ static int parse_encap_seg6local(struct rtattr *rta, size_t len, int *argcp,
 				 char ***argvp)
 {
 	int segs_ok = 0, hmac_ok = 0, table_ok = 0, nh4_ok = 0, nh6_ok = 0;
-	int iif_ok = 0, oif_ok = 0, action_ok = 0, srh_ok = 0;
-	__u32 action = 0, table, iif, oif;
+	int iif_ok = 0, oif_ok = 0, action_ok = 0, srh_ok = 0, timeout_ok = 0;
+	__u32 action = 0, table, iif, oif, timeout;
 	struct ipv6_sr_hdr *srh;
 	char **argv = *argvp;
 	int argc = *argcp;
 	char segbuf[1024];
 	inet_prefix addr;
 	__u32 hmac = 0;
+	int  nheth_ok = 0;
+	int nh_proto_ok = 0;
+        char ethaddr[8];
 
 	while (argc > 0) {
 		if (strcmp(*argv, "action") == 0) {
@@ -585,6 +632,24 @@ static int parse_encap_seg6local(struct rtattr *rta, size_t len, int *argcp,
 			if (!oif)
 				invarg("\"oif\" interface not found\n", *argv);
 			rta_addattr32(rta, len, SEG6_LOCAL_OIF, oif);
+		/* $Andrea */
+		} else if (strcmp(*argv, "nheth") == 0){
+                        NEXT_ARG();
+                        if (nheth_ok++)
+                                duparg2("nheth", *argv);
+
+                        if (ETH_ALEN != ll_addr_a2n((char *) ethaddr,
+                                                ETH_ALEN, *argv))
+                                invarg("\"nheth\" is not valid\n", *argv);
+                        rta_addattr_l(rta, len,
+                                        SEG6_LOCAL_NHETH, ethaddr, ETH_ALEN);
+		/* $Andrea */
+		} else if (strcmp(*argv, "age") == 0) {
+			NEXT_ARG();
+			if (timeout_ok++)
+				duparg2("age", *argv);
+			get_u32(&timeout, *argv, 0);
+			rta_addattr32(rta, len, SEG6_LOCAL_TIMEOUT, timeout);
 		} else if (strcmp(*argv, "srh") == 0) {
 			NEXT_ARG();
 			if (srh_ok++)
@@ -618,6 +683,26 @@ static int parse_encap_seg6local(struct rtattr *rta, size_t len, int *argcp,
 		fprintf(stderr, "Missing action type\n");
 		exit(-1);
 	}
+
+	/* $Andrea */
+        switch(action) {
+                case SEG6_LOCAL_ACTION_END_AD:
+                        /*
+                         * We want to be sure that the user has
+                         * selected only one nexthop proto; so we
+                         * do the check here.
+                         */
+                        nh_proto_ok = (nheth_ok + nh4_ok + nh6_ok);
+                        if (!nh_proto_ok)
+                                missarg("[nheth|nh6]");
+
+                        if (nh_proto_ok > 1)
+                                duparg2("nh*", "nexthop");
+
+			if (!timeout_ok)
+				missarg("age is required");
+                        break;
+        }
 
 	if (srh_ok) {
 		int srhlen;

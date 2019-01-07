@@ -15,6 +15,7 @@
 #define _LINUX_SEG6_LOCAL_H
 
 #include <linux/seg6.h>
+#include <linux/if_ether.h>
 
 enum {
 	SEG6_LOCAL_UNSPEC,
@@ -25,6 +26,10 @@ enum {
 	SEG6_LOCAL_NH6,
 	SEG6_LOCAL_IIF,
 	SEG6_LOCAL_OIF,
+	/* $Andrea */
+	SEG6_LOCAL_NHETH,
+	/* $Andrea */
+	SEG6_LOCAL_TIMEOUT,
 	__SEG6_LOCAL_MAX,
 };
 #define SEG6_LOCAL_MAX (__SEG6_LOCAL_MAX - 1)
@@ -59,10 +64,23 @@ enum {
 	SEG6_LOCAL_ACTION_END_AS	= 13,
 	/* forward to SR-unaware VNF with masquerading */
 	SEG6_LOCAL_ACTION_END_AM	= 14,
+	/*
+	 * $Andrea
+	 * forward to SR-unaware VNF with dinamic proxy
+	 */
+	SEG6_LOCAL_ACTION_END_AD	= 15,
 
 	__SEG6_LOCAL_ACTION_MAX,
 };
 
 #define SEG6_LOCAL_ACTION_MAX (__SEG6_LOCAL_ACTION_MAX - 1)
+
+/*
+ * $Andrea
+ * Those functions are exported in order to be accessible to other compilation
+ * units, for instace iprules.c.
+ */
+const char *seg6local_format_action_type(int action);
+int seg6local_read_action_type(const char *name);
 
 #endif
