@@ -24,6 +24,9 @@
 #include <linux/fib_rules.h>
 #include <errno.h>
 
+/* $Andrea */
+#include <linux/seg6_local.h>
+
 #include "rt_names.h"
 #include "utils.h"
 #include "ip_common.h"
@@ -45,7 +48,7 @@ static void usage(void)
 		"       ip rule { flush | save | restore }\n"
 		"       ip rule [ list [ SELECTOR ]]\n"
 		"SELECTOR := [ not ] [ from PREFIX ] [ to PREFIX ] [ tos TOS ] [ fwmark FWMARK[/MASK] ]\n"
-		"            [ iif STRING ] [ oif STRING ] [ pref NUMBER ] [ l3mdev ]\n"
+		"            [ iif STRING ] [ oif STRING ] [ pref NUMBER ] [ l3mdev ] [seg6local-behaviour BEHAVIOUR ]\n"
 		"            [ uidrange NUMBER-NUMBER ]\n"
 		"ACTION := [ table TABLE_ID ]\n"
 		"          [ nat ADDRESS ]\n"
@@ -268,6 +271,14 @@ int print_rule(const struct sockaddr_nl *who, struct nlmsghdr *n, void *arg)
 	if (tb[FRA_L3MDEV]) {
 		if (rta_getattr_u8(tb[FRA_L3MDEV]))
 			fprintf(fp, "lookup [l3mdev-table] ");
+	}
+
+	/* $Andrea */
+	if (tb[FRA_SEG6_LOCAL_ACTION]) {
+		int action = rta_getattr_u32(tb[FRA_SEG6_LOCAL_ACTION]);
+
+		fprintf(fp, "seg6local-behaviour %s ",
+				seg6local_format_action_type(action));
 	}
 
 	if (tb[FRA_UID_RANGE]) {
@@ -574,6 +585,7 @@ static int iprule_restore(void)
 static int iprule_modify(int cmd, int argc, char **argv)
 {
 	int l3mdev_rule = 0;
+	int seg6_local_rule = 0;
 	int table_ok = 0;
 	__u32 tid = 0;
 	struct {
@@ -726,6 +738,19 @@ static int iprule_modify(int cmd, int argc, char **argv)
 			addattr32(&req.n, sizeof(req), RTA_GATEWAY,
 				  get_addr32(*argv));
 			req.r.rtm_type = RTN_NAT;
+		}
+		/* $Andrea */
+		else if (strcmp(*argv, "seg6local-behaviour") == 0) {
+			int action;
+
+			NEXT_ARG();
+			action = seg6local_read_action_type(*argv);
+			if (action == SEG6_LOCAL_ACTION_UNSPEC)
+				invarg("invalid seg6local behaviour\n", *argv);
+			addattr32(&req.n, sizeof(req),
+				FRA_SEG6_LOCAL_ACTION, action);
+			table_ok = 1;
+			seg6_local_rule = 1;
 		} else {
 			int type;
 
@@ -757,6 +782,20 @@ static int iprule_modify(int cmd, int argc, char **argv)
 	if (l3mdev_rule && tid != 0) {
 		fprintf(stderr,
 			"table can not be specified for l3mdev rules\n");
+		return -EINVAL;
+	}
+
+	/* $Andrea */
+	if (l3mdev_rule && seg6_local_rule != 0) {
+		fprintf(stderr, "lm3dev and seg6local-behaviour can not be used "
+			"both in the same rule\n");
+		return -EINVAL;
+	}
+
+	/* $Andrea */
+	if (seg6_local_rule != 0 && tid != 0) {
+		fprintf(stderr,
+			"table can not be specified for seg6local-behaviour rules\n");
 		return -EINVAL;
 	}
 
